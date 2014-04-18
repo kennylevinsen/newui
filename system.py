@@ -1,7 +1,9 @@
-import select, sys, termios, fcntl, signal, os
+from __future__ import print_function
+import select, signal, sys, termios, fcntl, signal, os
 from pyte import ByteStream
 from terminal import Terminal
 from document import *
+from screenbuffer import ScreenBuffer
 
 class ByteStream(ByteStream):
     def __init__(self, cb):
@@ -12,59 +14,6 @@ class ByteStream(ByteStream):
         self.cb(Event(event, args, kwargs))
         if kwargs.get('reset', True):
             self.reset()
-
-class Screen(object):
-    'Screen buffer'
-    def __init__(self, height, width):
-        self.height = height
-        self.width = width
-        self.lines = [[None for y in range(width)] for i in range(height)]
-
-    def set(self, x, y, val):
-        self.lines[y][x] = val
-
-    def get(self, x, y):
-        return self.lines[y][x]
-
-    def compile(self, other=None):
-        if other is None:
-            return self.compile_full()
-
-        if self.height != other.height or self.width != other.width:
-            return self.compile()
-
-        changed_coords = []
-        for y in range(0, self.height):
-            for x in range(0, self.width):
-                old_char = other.lines[y][x]
-                new_char = self.lines[y][x]
-                if old_char != new_char:
-                    changed_coords.append((x, y))
-
-        res = []
-        prev_x = 0
-        prev_y = 0
-        for x,y in changed_coords:
-            c = self.lines[y][x]
-            if y == prev_y and x == prev_x + 1:
-                res.append(c)
-            else:
-                if c is None:
-                    c = ' '
-                res.append('\x1b[%d;%dH%s' % (y+1, x+1, c))
-        return ''.join(res)
-
-    def compile_full(self):
-        s = []
-        for i,line in enumerate(self.lines):
-            l = []
-            for c in line:
-                if c is None:
-                    l.append(' ')
-                else:
-                    l.append(c)
-            s.append('\x1b[%d;1H%s' % (i+1, ''.join(l)))
-        return ''.join(s)
 
 
 class Renderer(object):
@@ -87,7 +36,7 @@ The renderer is still not feature complete, though, which should be of higher pr
         box_stack = [(height, width, 0, 0)]
         cur_pos = [(0,0)]
         styles = ['']
-        screen = Screen(height, width)
+        screen = ScreenBuffer(height, width)
 
         def split_text(t, width, lx):
             parts = []
@@ -101,7 +50,6 @@ The renderer is still not feature complete, though, which should be of higher pr
         def block(obj):
             height, width, x_off, y_off = box_stack[-1]
             cx, cy = cur_pos[-1]
-            lx, ly = width-cx, height-cy
 
             height = height if obj.height is None else obj.height
             width = width if obj.width is None else obj.width
@@ -128,14 +76,13 @@ The renderer is still not feature complete, though, which should be of higher pr
         def text(obj):
             height, width, x_off, y_off = box_stack[-1]
             cx, cy = cur_pos[-1]
-            lx, ly = width-cx, height-cy
             lstyle = ''.join(styles)
 
             for c in obj.content:
                 if y_off + cy >= height:
                     break
                 screen.set(x_off+cx, y_off+cy, lstyle+c+Terminal.reset())
-                if x_off + cx == width -1:
+                if x_off + cx == width-1:
                     cx = 0
                     cy += 1
                 else:
@@ -201,18 +148,24 @@ This class manages the entire application, from calling the renderer to dispatch
 
         self.document.setdimensions(*self.getdimensions())
         self.setup()
+        self.setup_signal()
         self.newscreen()
 
     def updatehook(self, obj):
         self.render(obj)
 
-    def render(self, obj=None):
+    def render(self, obj=None, _retry=0):
         if self.document.body is None:
             return
         h, w = self.document.height, self.document.width
         doc = self.renderer.render(h, w)
-        sys.stdout.write(doc)
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(doc)
+            sys.stdout.flush()
+        except:
+            if _retry < 3:
+                return self.render(obj, _retry+1)
+
 
     def getdimensions(self):
         h = bytearray(fcntl.ioctl(0, termios.TIOCGWINSZ, '1234'))
@@ -232,12 +185,8 @@ This class manages the entire application, from calling the renderer to dispatch
         self.newscreen()
 
     def setup_signal(self):
-        try:
-            import signal
-            signal.signal(signal.SIGWINCH, lambda s,f: self.rescale())
-            signal.signal(signal.SIGCONT, lambda s,f: self.restore())
-        except:
-            raise
+        signal.signal(signal.SIGWINCH, lambda s,f: self.rescale())
+        signal.signal(signal.SIGCONT, lambda s,f: self.restore())
 
     def newscreen(self):
         rendering = '\x1b[0m'
