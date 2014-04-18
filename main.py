@@ -1,29 +1,6 @@
 from system import *
 import sys, pdb
 
-class TestView(object):
-    def __init__(self, document):
-        self.document = document
-        self.top = document.top()
-        self.block = Block()
-        self.block.height = document.height
-        self.block.width = document.width
-        # self.block.attach(Text('Hello'))
-        ba = Block()
-        bb = Block()
-        ba.attach([Text('Hello World'), Newline(), Text('You\'re beautiful')])
-        bb.attach([Text('I am your fatherdddddddddddddddddddddddddddddddddddddddd'), Newline(), Text('Yes'), Newline(), Text('I am')])
-
-        ba.absolute = True
-        bb.absolute = True
-        ba.pos_x = 5
-        ba.pos_y = 2
-        bb.pos_x = 30
-        bb.pos_y = 1
-        self.block.attach(ba)
-        self.block.attach(bb)
-        self.document.attach(self.block)
-
 class View(object):
     def __init__(self, document):
         self.document = document
@@ -48,7 +25,6 @@ class View(object):
         self.bottom.height = 1
         self.bottom.pos_y = self.document.height
         self.bottom.attach(Text('    newui'))
-
 
         self.document.attach(self.block)
         self.scroll = 1
@@ -114,7 +90,7 @@ class View(object):
         elif e.type == 'resize':
             self.bottom.pos_y = self.document.height
             self.update_gutter(self.scroll)
-            self.update_text('    Resizing...')
+            # self.update_text('    Resizing...')
 
 
 s = System()
@@ -122,10 +98,10 @@ try:
     a = s.getdocument()
     v = View(a)
     a.attachevent(v.callback)
-    # b = TestView(a)
     s.start()
 except KeyboardInterrupt:
     s.cleanup()
-except:
+except Exception as e:
     s.cleanup()
+    print(e)
     pdb.post_mortem(sys.exc_traceback)
