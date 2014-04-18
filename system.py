@@ -13,6 +13,59 @@ class ByteStream(ByteStream):
         if kwargs.get('reset', True):
             self.reset()
 
+class Screen(object):
+    'Screen buffer'
+    def __init__(self, height, width):
+        self.height = height
+        self.width = width
+        self.lines = [[None for y in range(width)] for i in range(height)]
+
+    def set(self, x, y, val):
+        self.lines[y][x] = val
+
+    def get(self, x, y):
+        return self.lines[y][x]
+
+    def compile(self, other=None):
+        if other is None:
+            return self.compile_full()
+
+        if self.height != other.height or self.width != other.width:
+            return self.compile()
+
+        changed_coords = []
+        for y in range(0, self.height):
+            for x in range(0, self.width):
+                old_char = other.lines[y][x]
+                new_char = self.lines[y][x]
+                if old_char != new_char:
+                    changed_coords.append((x, y))
+
+        res = []
+        prev_x = 0
+        prev_y = 0
+        for x,y in changed_coords:
+            c = self.lines[y][x]
+            if y == prev_y and x == prev_x + 1:
+                res.append(c)
+            else:
+                if c is None:
+                    c = ' '
+                res.append('\x1b[%d;%dH%s' % (y+1, x+1, c))
+        return ''.join(res)
+
+    def compile_full(self):
+        s = []
+        for i,line in enumerate(self.lines):
+            l = []
+            for c in line:
+                if c is None:
+                    l.append(' ')
+                else:
+                    l.append(c)
+            s.append('\x1b[%d;1H%s' % (i+1, ''.join(l)))
+        return ''.join(s)
+
 
 class Renderer(object):
     """
@@ -27,16 +80,14 @@ The renderer is still not feature complete, though, which should be of higher pr
 """
     def __init__(self, o):
         self.obj = o
-        self.doc = ''
-        self.box_stack = []
-        self.cur_pos = []
+        self.old_scr = None
 
-    def render(self, height, width, tabstop=4, obj=None):
-        self.doc = '\x1b[2J'
+    def render(self, height, width, tabstop=4):
         obj = self.obj.body
-        self.box_stack = [(height, width, 0, 0)]
-        self.cur_pos = [(0,0)]
-        self.wrapping = [('', '')]
+        box_stack = [(height, width, 0, 0)]
+        cur_pos = [(0,0)]
+        styles = ['']
+        screen = Screen(height, width)
 
         def split_text(t, width, lx):
             parts = []
@@ -48,8 +99,8 @@ The renderer is still not feature complete, though, which should be of higher pr
             return parts
 
         def block(obj):
-            height, width, x_off, y_off = self.box_stack[-1]
-            cx, cy = self.cur_pos[-1]
+            height, width, x_off, y_off = box_stack[-1]
+            cx, cy = cur_pos[-1]
             lx, ly = width-cx, height-cy
 
             height = height if obj.height is None else obj.height
@@ -66,65 +117,56 @@ The renderer is still not feature complete, though, which should be of higher pr
             height -= obj.margin_bottom + obj.margin_top
             width -= obj.margin_left + obj.margin_right
 
-            self.cur_pos.append((0,0))
-            self.box_stack.append((height, width, x_off, y_off))
+            cur_pos.append((0,0))
+            box_stack.append((height, width, x_off, y_off))
 
             obj.enter(selector)
 
-            self.box_stack.pop()
-            self.cur_pos.pop()
+            box_stack.pop()
+            cur_pos.pop()
 
         def text(obj):
-            height, width, x_off, y_off = self.box_stack[-1]
-            cx, cy = self.cur_pos[-1]
+            height, width, x_off, y_off = box_stack[-1]
+            cx, cy = cur_pos[-1]
             lx, ly = width-cx, height-cy
-            prefix, postfix = self.wrapping[-1]
+            lstyle = ''.join(styles)
 
-            parts = split_text(obj.content, width, lx)
-            for i in parts:
-                if cx >= width or cy >= height:
+            for c in obj.content:
+                if y_off + cy >= height:
                     break
-                self.doc += '%s\x1b[%d;%dH%s%s' % (prefix, y_off+cy+1, x_off+cx+1, i, postfix)
-                # if len(i) == 56:
-                #     raise RuntimeError('%d, %d, %d, %d' % (x_off, cx, len(i), width))
-                if x_off + cx + len(i) + 1 >= width-1:
+                screen.set(x_off+cx, y_off+cy, lstyle+c+Terminal.reset())
+                if x_off + cx == width -1:
                     cx = 0
                     cy += 1
                 else:
-                    cx += len(i)
-            self.cur_pos[-1] = (cx, cy)
+                    cx += 1
+            cur_pos[-1] = (cx, cy)
 
 
         def newline(obj):
-            cx, cy = self.cur_pos[-1]
-            self.cur_pos[-1] = (0, cy + 1)
+            cx, cy = cur_pos[-1]
+            cur_pos[-1] = (0, cy + 1)
 
         def tab(obj):
-            height, width, x_off, y_off = self.box_stack[-1]
-            cx, cy = self.cur_pos[-1]
+            height, width, x_off, y_off = box_stack[-1]
+            cx, cy = cur_pos[-1]
             diff = tabstop - (cx % tabstop)
-            # diff = tabstop - (len(self.doc[-1]) % tabstop)
             if cx + diff > width:
                 cy += 1
                 cx = diff
             else:
                 cx += diff
-            self.cur_pos[-1] = (cx, cy)
+            cur_pos[-1] = (cx, cy)
 
         def style(obj):
-            post, pre = self.wrapping[-1]
             p = ''
             if obj.color:
                 p += Terminal.fcolor(obj.color, obj.bright)
             if obj.bg_color:
                 p += Terminal.bcolor(obj.bg_color, obj.bg_bright)
-            if post == '':
-                self.wrapping.append((p, Terminal.reset()))
-            else:
-                self.wrapping.append((p, Terminal.reset()+post))
+            styles.append(p)
             obj.enter(selector)
-            self.wrapping.pop()
-
+            styles.pop()
 
         def selector(obj):
             if obj.type == 'text':
@@ -139,7 +181,9 @@ The renderer is still not feature complete, though, which should be of higher pr
                 return style(obj)
             return obj.enter(selector)
         selector(obj)
-        return self.doc
+        res = screen.compile(self.old_scr)
+        self.old_scr = screen
+        return res
 
 class System(object):
     """
@@ -166,13 +210,9 @@ This class manages the entire application, from calling the renderer to dispatch
         if self.document.body is None:
             return
         h, w = self.document.height, self.document.width
-        self.renderer.render(h, w, obj=obj)
-        # pprint.pprint(self.renderer.doc)
-        try:
-            sys.stdout.write(self.renderer.doc)
-            sys.stdout.flush()
-        except:
-            pass
+        doc = self.renderer.render(h, w)
+        sys.stdout.write(doc)
+        sys.stdout.flush()
 
     def getdimensions(self):
         h = bytearray(fcntl.ioctl(0, termios.TIOCGWINSZ, '1234'))
