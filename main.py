@@ -1,4 +1,5 @@
 from system import *
+import sys, pdb
 
 class TestView(object):
     def __init__(self, document):
@@ -37,7 +38,7 @@ class View(object):
         self.block.attach(self.bottom)
 
         self.gutter.width = 5
-        self.editor.margin_left = 6
+        self.editor.margin_left = 0
         self.editor.margin_bottom = 1
         self.gutter.margin_bottom = 1
 
@@ -119,10 +120,12 @@ class View(object):
 s = System()
 try:
     a = s.getdocument()
-    # v = View(a)
-    # a.attachevent(v.callback)
-    b = TestView(a)
+    v = View(a)
+    a.attachevent(v.callback)
+    # b = TestView(a)
     s.start()
+except KeyboardInterrupt:
+    s.cleanup()
 except:
     s.cleanup()
-    raise
+    pdb.post_mortem(sys.exc_traceback)
