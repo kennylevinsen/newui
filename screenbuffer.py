@@ -94,7 +94,7 @@ class ScreenBuffer(object):
                 # Single-character move
                 # Cursor moves forward by itself, so no work necessary
                 self._compile_char(x, y, res)
-            elif origin_move and y == prev_y and x < prev_x + 6:
+            elif origin_move and y == prev_y and x < prev_x + (6 + (x > 9) + (y > 9)):
                 # Multi-character move
                 # Short enough that it's faster to just render
                 # everything up to this character to move the cursor
