@@ -27,7 +27,6 @@ class Node(object):
         self.parent = None
 
         self.id = None
-        self._class = None
 
         self.absolute = False
         self.width = None
@@ -39,9 +38,6 @@ class Node(object):
         self.margin_right = 0
         self.margin_top = 0
         self.margin_bottom = 0
-
-        self._cur_width = 0
-        self._cur_height = 1
 
     def __hash__(self):
         return id(self)
@@ -134,7 +130,6 @@ class Text(BachelorNode):
     def content(self, value):
         self._content = value
         self._notify()
-
 
 class Newline(BachelorNode):
     type = 'newline'
