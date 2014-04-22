@@ -3,12 +3,38 @@ import select, signal, sys, termios, fcntl, signal, os
 from pyte import ByteStream
 from terminal import Terminal
 from document import *
-from screenbuffer import ScreenBuffer
+from screenbuffer import *
 
 class ByteStream(ByteStream):
     def __init__(self, cb):
         super(ByteStream, self).__init__()
         self.cb = cb
+        self.basic.update({
+                          '\x7f': 'backspace'
+                          })
+        self.csi.update({
+                        1: 'home',
+                        2: 'insert',
+                        3: 'delete',
+                        4: 'end',
+                        5: 'page_up',
+                        6: 'page_down',
+                        15: 'f5',
+                        17: 'f6',
+                        18: 'f7',
+                        19: 'f8',
+                        20: 'f9',
+                        })
+
+    def _arguments(self, char):
+        try:
+            super(ByteStream, self)._arguments(char)
+        except KeyError:
+            if char == '~':
+                char = self.params[0]
+                self.dispatch(self.csi[char])
+            else:
+                raise
 
     def dispatch(self, event, *args, **kwargs):
         self.cb(Event(event, args, kwargs))
@@ -35,7 +61,7 @@ The renderer is still not feature complete, though, which should be of higher pr
         obj = self.obj.body
         box_stack = [(height, width, 0, 0)]
         cur_pos = [(0,0)]
-        styles = ['']
+        styles = [(None, None)]
         screen = ScreenBuffer(height, width)
 
         def split_text(t, width, lx):
@@ -76,19 +102,18 @@ The renderer is still not feature complete, though, which should be of higher pr
         def text(obj):
             height, width, x_off, y_off = box_stack[-1]
             cx, cy = cur_pos[-1]
-            lstyle = ''.join(styles)
+            fstyle, bstyle = styles[-1]
 
             for c in obj.content:
                 if y_off + cy >= height:
                     break
-                screen.set(x_off+cx, y_off+cy, lstyle+c+Terminal.reset())
+                screen.set(x_off+cx, y_off+cy, c, fstyle, bstyle)
                 if x_off + cx == width-1:
                     cx = 0
                     cy += 1
                 else:
                     cx += 1
             cur_pos[-1] = (cx, cy)
-
 
         def newline(obj):
             cx, cy = cur_pos[-1]
@@ -106,12 +131,12 @@ The renderer is still not feature complete, though, which should be of higher pr
             cur_pos[-1] = (cx, cy)
 
         def style(obj):
-            p = ''
+            f, b = None, None
             if obj.color:
-                p += Terminal.fcolor(obj.color, obj.bright)
+                f = Terminal.fcolor(obj.color, obj.bright)
             if obj.bg_color:
-                p += Terminal.bcolor(obj.bg_color, obj.bg_bright)
-            styles.append(p)
+                b = Terminal.bcolor(obj.bg_color, obj.bg_bright)
+            styles.append((f, b))
             obj.enter(selector)
             styles.pop()
 
