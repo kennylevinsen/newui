@@ -17,6 +17,20 @@ class View(object):
         self.gutter.width = 5
         self.editor.margin_left = 0
         self.editor.margin_bottom = 1
+
+        self.cursor = Block()
+        self.cursor.pos_x = 10
+        self.cursor.pos_y = 0
+        curstyle = Style()
+        curstyle.bg_color = 'white'
+        curstyle.fg_color = 'black'
+        curstyle.attach(Text('K'))
+        self.cursor.attach(curstyle)
+        self.editor.attach(self.cursor)
+
+        self.cursor_x = 0
+        self.cursor_y = 0
+
         self.gutter.margin_bottom = 1
 
         self.gutter.attach(Node())
@@ -31,6 +45,8 @@ class View(object):
         self.current = self.editor.attach(Text(''))
         self.update_gutter(self.scroll)
         self.rawdata = ''
+
+        self.document.attachevent(self.callback)
 
     def update_gutter(self, start=1):
         # Set width
@@ -55,13 +71,20 @@ class View(object):
         self.bottom.detach(index=0, _notify=False)
         self.bottom.attach(Text(text))
 
+    def update_cursor(self):
+        self.cursor.pos_x = self.cursor_x
+        self.cursor.pos_y = self.cursor_y
+        self.cursor._notify()
+
     def callback(self, e):
         if e.type == 'draw':
             c = e.args[0]
             self.current.content += c
             if c == ' ':
                 self.current = self.editor.attach(Text(''))
-        elif e.type == 'backspace':
+            self.cursor_x += 1
+            self.update_cursor()
+        elif e.type == 'delete':
             if self.current.type != 'text' or self.current.content == '':
                 self.editor.detach(self.current)
                 self.current = None
@@ -81,12 +104,30 @@ class View(object):
             self.editor.attach(Tab())
             self.current = self.editor.attach(Text(''))
         elif e.type == 'cursor_down':
-            self.scroll += 1
+            self.cursor_y += 1
+            if self.cursor_y >= self.document.height:
+                self.scroll += 1
+                self.cursor_y = self.document.height-1
+            self.update_cursor()
             self.update_gutter(self.scroll)
         elif e.type == 'cursor_up':
-            self.scroll -= 1
-            if self.scroll < 1: self.scroll = 1
+            self.cursor_y -= 1
+            if self.cursor_y < 0:
+                self.scroll -= 1
+                self.cursor_y = 0
+            self.update_cursor()
             self.update_gutter(self.scroll)
+        elif e.type == 'cursor_left':
+            self.cursor_x -= 1
+            if self.cursor_x < 0:
+                self.cursor_y -= 1
+                self.cursor_x = self.document.width
+            self.update_cursor()
+        elif e.type == 'cursor_right':
+            self.cursor_x += 1
+            if self.cursor_x > self.document.width:
+                self.cursor_y += 1
+                self.cursor_x = 0
         elif e.type == 'resize':
             self.bottom.pos_y = self.document.height
             self.update_gutter(self.scroll)
@@ -97,7 +138,6 @@ s = System()
 try:
     a = s.getdocument()
     v = View(a)
-    a.attachevent(v.callback)
     s.start()
 except KeyboardInterrupt:
     s.cleanup()
