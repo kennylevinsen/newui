@@ -75,7 +75,7 @@ class Node(object):
         if _notify: self._notify()
         return o
 
-    def detach(self, o=None, index=None, _notify = True):
+    def detach(self, o=None, index=None, _notify=True):
         if o is None:
             if index is None:
                 raise NodeError('detach requires either object or index')
