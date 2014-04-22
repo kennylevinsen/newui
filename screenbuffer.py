@@ -87,8 +87,7 @@ class ScreenBuffer(object):
         # We need to keep a track
         res = []
         origin_move = False
-        prev_x = -10
-        prev_y = -10
+        prev_x, prev_y = -10, -10
         for x,y in changed_coords:
             if origin_move and y == prev_y and x == prev_x + 1:
                 # Single-character move
@@ -103,17 +102,24 @@ class ScreenBuffer(object):
             else:
                 # Long multi-character move, or first move
                 # Use a cursor move
-                res.append('\x1b[%d;%dH' % (y+1, x+1))
+                if x == 0 and y == prev_y + 1:
+                    res.append('\n')
+                elif x == prev_x + 1 and y == prev_y + 1:
+                    res.append('\v')
+                else:
+                    res.append('\x1b[%d;%dH' % (y+1, x+1))
                 self._compile_char(x, y, res)
                 origin_move = True
+            prev_x, prev_y = x, y
+
         return ''.join(res)
 
     def compile_full(self):
         '''Compiles a regular render-string
         :returns: str - The rendered command string'''
-        res = []
+        res = ['\x1b[1;1H\x1b[0m']
         for y in range(self._height):
-            res.append('\x1b[0m\x1b[%d;1H' % (y + 1))
             for x in range(self._width):
                 self._compile_char(x, y, res)
+            res.append('\n')
         return ''.join(res)
