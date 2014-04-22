@@ -9,32 +9,8 @@ class ByteStream(ByteStream):
     def __init__(self, cb):
         super(ByteStream, self).__init__()
         self.cb = cb
-        self.basic.update({
-                          '\x7f': 'backspace'
-                          })
-        self.csi.update({
-                        1: 'home',
-                        2: 'insert',
-                        3: 'delete',
-                        4: 'end',
-                        5: 'page_up',
-                        6: 'page_down',
-                        15: 'f5',
-                        17: 'f6',
-                        18: 'f7',
-                        19: 'f8',
-                        20: 'f9',
-                        })
-
-    def _arguments(self, char):
-        try:
-            super(ByteStream, self)._arguments(char)
-        except KeyError:
-            if char == '~':
-                char = self.params[0]
-                self.dispatch(self.csi[char])
-            else:
-                raise
+        self.csi['~'] = 'function_key'
+        self.basic['\x7f'] = 'delete'
 
     def dispatch(self, event, *args, **kwargs):
         self.cb(Event(event, args, kwargs))
