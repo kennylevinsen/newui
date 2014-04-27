@@ -11,18 +11,47 @@ class ScreenBuffer(object):
         :param int width: The width of the screen buffer'''
         self._height = height
         self._width = width
-        self._lines = [[(' ', None, None) for y in range(width)] for i in range(height)]
+        self._lines = [[(' ', None, None, -1) for y in range(width)] for i in range(height)]
         self._prev_modes = (None, None)
 
-    def set(self, x, y, val, fg=None, bg=None):
+    def set(self, x, y, val=None, fg=None, bg=None, z_index=0):
         '''Set a cell in the screen buffer
+
+        Only the parameters provided will be sat for the cell. All other properties will be inherited from a previous set or a set of lower z_index
 
         :param int x: The x coordinate
         :param int y: The y coordinate
         :param str val: The value to set
         :param str fg: The foreground mode
         :param str bg: The background mode'''
-        self._lines[y][x] = (val, fg, bg)
+        try:
+            oval, ofg, obg, oz_index = self._lines[y][x]
+            if z_index >= oz_index:
+                if val is not None:
+                    oval = val
+                if fg is not None:
+                    ofg = fg
+                if bg is not None:
+                    obg = bg
+            else:
+                if (oval is None or oval == ' ') and val is not None:
+                    oval = val
+                if ofg is None and fg is not None:
+                    ofg = fg
+                if obg is None and bg is not None:
+                    obg = bg
+
+            if oval is None:
+                oval = ' '
+
+            self._lines[y][x] = (oval, ofg, obg, z_index)
+        except IndexError:
+            m = None
+            if y >= len(self._lines):
+                m = 'Attempt to set row outside of screen bounds'
+            elif x >= len(self._lines[y]):
+                m = 'Attempt to set column outside of screen bounds'
+            raise IndexError(m)
 
     def get(self, x, y):
         '''Get a cell from the screen buffer
@@ -30,7 +59,15 @@ class ScreenBuffer(object):
         :param int x: The x coordinate
         :param int y: The y coordinate
         :returns: tuple -- The content of the cell'''
-        return self._lines[y][x]
+        try:
+            return self._lines[y][x]
+        except IndexError:
+            m = None
+            if y >= len(self._lines):
+                m = 'Attempt to get row outside of screen bounds'
+            elif x >= len(self._lines[y]):
+                m = 'Attempt to get column outside of screen bounds'
+            raise IndexError(m)
 
     def _diff(self, old):
         '''Internal diff calculator between two ScreenBuffers.
@@ -40,9 +77,9 @@ class ScreenBuffer(object):
         changed_coords = []
         for y in range(0, self._height):
             for x in range(0, self._width):
-                oc, of, ob = old._lines[y][x]
-                nc, nf, nb = self._lines[y][x]
-                if (oc, of, ob) != (nc, nf, nb):
+                oc, of, ob, oz = old._lines[y][x]
+                nc, nf, nb, nz = self._lines[y][x]
+                if (oc, of, ob, oz) != (nc, nf, nb, nz):
                     changed_coords.append((x, y))
         return changed_coords
 
@@ -53,7 +90,9 @@ class ScreenBuffer(object):
         :param int x: The x coordinate
         :param int y: The y coordinate
         :param list res: The result list'''
-        c, f, b = self._lines[y][x]
+        c, f, b, z = self._lines[y][x]
+        # if f == '\x1b[36m':
+        #     import pdb;pdb.set_trace()
         of, ob = self._prev_modes
         if f != of:
             if f is None: res.append('\x1b[39m')
@@ -63,6 +102,17 @@ class ScreenBuffer(object):
             else: res.append(b)
         self._prev_modes = (f, b)
         res.append(c)
+
+    def _compile_full(self):
+        '''Compiles a regular render-string
+        :returns: str - The rendered command string'''
+        res = ['\x1b[1;1H']
+        for y in range(self._height):
+            for x in range(self._width):
+                self._compile_char(x, y, res)
+            res.append('\n')
+        res.pop()
+        return ''.join(res)
 
     def compile(self, old=None):
         '''Compile render-string
@@ -74,7 +124,7 @@ class ScreenBuffer(object):
         :param ScreenBuffer old: The old screen instance
         :returns: str - The rendered command string'''
         if old is None:
-            return self.compile_full()
+            return self._compile_full()
 
         # Do not attempt optimized rendition after rescale
         if self._height != old._height or self._width != old._width:
@@ -112,14 +162,4 @@ class ScreenBuffer(object):
                 origin_move = True
             prev_x, prev_y = x, y
 
-        return ''.join(res)
-
-    def compile_full(self):
-        '''Compiles a regular render-string
-        :returns: str - The rendered command string'''
-        res = ['\x1b[1;1H\x1b[0m']
-        for y in range(self._height):
-            for x in range(self._width):
-                self._compile_char(x, y, res)
-            res.append('\n')
         return ''.join(res)
