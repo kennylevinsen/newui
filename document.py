@@ -22,12 +22,14 @@ class NodeError(RuntimeError):
 class Node(object):
     type = 'none'
     def __init__(self):
+        # Internal attributes
         self.children = []
         self.updatehook = None
         self.parent = None
 
         self.id = None
 
+        # Style attributes
         self.absolute = False
         self.width = None
         self.height = None
@@ -38,6 +40,9 @@ class Node(object):
         self.margin_right = 0
         self.margin_top = 0
         self.margin_bottom = 0
+
+        # Random user storage
+        self.data = {}
 
     def __hash__(self):
         return id(self)
@@ -180,6 +185,16 @@ class Style(Node):
         self._bg_bright = value
         self._notify()
 
+class StyleOverride(Style):
+    type = 'styleoverride'
+    def __init__(self):
+        super(StyleOverride, self).__init__()
+
+    def attach(self, o):
+        raise NodeError('Node is not mature enough to become a parent')
+
+    def detach(self, o):
+        raise NodeError('Node is not mature enough to lose a child')
 
 
 class Document(Node):
