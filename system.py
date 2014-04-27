@@ -31,107 +31,115 @@ The renderer is still not feature complete, though, which should be of higher pr
 """
     def __init__(self, o):
         self.obj = o
+        self.box_stack = []
+        self.cur_pos = []
+        self.styles = []
+        self.screen = None
         self.old_scr = None
 
-    def render(self, height, width, tabstop=4):
+    def render(self, height, width, tabstop=4, differential=True):
         obj = self.obj.body
-        box_stack = [(height, width, 0, 0)]
-        cur_pos = [(0,0)]
-        styles = [(None, None)]
-        screen = ScreenBuffer(height, width)
+        self.box_stack = [(height, width, 0, 0)]
+        self.cur_pos = [(0,0)]
+        self.styles = [(None, None)]
+        self.screen = ScreenBuffer(height, width)
 
-        def split_text(t, width, lx):
-            parts = []
-            l = len(t)
-            parts.append(t[:lx])
-            while lx < l:
-                parts.append(t[lx:lx+width])
-                lx += width
-            return parts
-
-        def block(obj):
-            height, width, x_off, y_off = box_stack[-1]
-            cx, cy = cur_pos[-1]
-
-            height = height if obj.height is None else obj.height
-            width = width if obj.width is None else obj.width
-            if obj.absolute:
-                x_off = obj.pos_x
-                y_off = obj.pos_y
-            else:
-                x_off += cx
-                y_off += cy
-
-            x_off += obj.margin_left
-            y_off += obj.margin_top
-            height -= obj.margin_bottom + obj.margin_top
-            width -= obj.margin_left + obj.margin_right
-
-            cur_pos.append((0,0))
-            box_stack.append((height, width, x_off, y_off))
-
-            obj.enter(selector)
-
-            box_stack.pop()
-            cur_pos.pop()
-
-        def text(obj):
-            height, width, x_off, y_off = box_stack[-1]
-            cx, cy = cur_pos[-1]
-            fstyle, bstyle = styles[-1]
-
-            for c in obj.content:
-                if y_off + cy >= height:
-                    break
-                screen.set(x_off+cx, y_off+cy, c, fstyle, bstyle)
-                if x_off + cx == width-1:
-                    cx = 0
-                    cy += 1
-                else:
-                    cx += 1
-            cur_pos[-1] = (cx, cy)
-
-        def newline(obj):
-            cx, cy = cur_pos[-1]
-            cur_pos[-1] = (0, cy + 1)
-
-        def tab(obj):
-            height, width, x_off, y_off = box_stack[-1]
-            cx, cy = cur_pos[-1]
-            diff = tabstop - (cx % tabstop)
-            if cx + diff > width:
-                cy += 1
-                cx = diff
-            else:
-                cx += diff
-            cur_pos[-1] = (cx, cy)
-
-        def style(obj):
-            f, b = None, None
-            if obj.color:
-                f = Terminal.fcolor(obj.color, obj.bright)
-            if obj.bg_color:
-                b = Terminal.bcolor(obj.bg_color, obj.bg_bright)
-            styles.append((f, b))
-            obj.enter(selector)
-            styles.pop()
-
-        def selector(obj):
-            if obj.type == 'text':
-                return text(obj)
-            elif obj.type == 'newline':
-                return newline(obj)
-            elif obj.type == 'tab':
-                return tab(obj)
-            elif obj.type == 'block':
-                return block(obj)
-            elif obj.type == 'style':
-                return style(obj)
-            return obj.enter(selector)
-        selector(obj)
-        res = screen.compile(self.old_scr)
-        self.old_scr = screen
+        self.selector(obj)
+        res = self.screen.compile(self.old_scr if differential else None)
+        self.old_scr = self.screen
         return res
+
+    def _block(self, obj):
+        box_stack = self.box_stack
+        cur_pos = self.cur_pos
+
+        height, width, x_off, y_off = box_stack[-1]
+        cx, cy = cur_pos[-1]
+
+        height = height if obj.height is None else obj.height
+        width = width if obj.width is None else obj.width
+        if obj.absolute:
+            x_off = obj.pos_x
+            y_off = obj.pos_y
+        else:
+            x_off += cx
+            y_off += cy
+
+        x_off += obj.margin_left
+        y_off += obj.margin_top
+        height -= obj.margin_bottom + obj.margin_top
+        width -= obj.margin_left + obj.margin_right
+
+        cur_pos.append((0,0))
+        box_stack.append((height, width, x_off, y_off))
+
+        obj.enter(self.selector)
+
+        box_stack.pop()
+        cur_pos.pop()
+
+    def _text(self, obj):
+        height, width, x_off, y_off = self.box_stack[-1]
+        cx, cy = self.cur_pos[-1]
+        fstyle, bstyle = self.styles[-1]
+
+        for c in obj.content:
+            if cy >= height:
+                break
+            if cy >= 0:
+                self.screen.set(x_off+cx, y_off+cy, c, fstyle, bstyle)
+            if cx == width-1:
+                cx = 0
+                cy += 1
+            else:
+                cx += 1
+        self.cur_pos[-1] = (cx, cy)
+
+    def _newline(self, obj):
+        cx, cy = self.cur_pos[-1]
+        self.cur_pos[-1] = (0, cy + 1)
+
+    def _tab(self, obj):
+        height, width, x_off, y_off = self.box_stack[-1]
+        cx, cy = self.cur_pos[-1]
+        diff = self.tabstop - (cx % self.tabstop)
+        if cx + diff > width:
+            cy += 1
+            cx = diff
+        else:
+            cx += diff
+        self.cur_pos[-1] = (cx, cy)
+
+    def _style(self, obj):
+        f, b = None, None
+        if obj.color:
+            f = Terminal.fcolor(obj.color, obj.bright)
+        if obj.bg_color:
+            b = Terminal.bcolor(obj.bg_color, obj.bg_bright)
+        self.styles.append((f, b))
+        obj.enter(self.selector)
+        self.styles.pop()
+
+    def _styleoverride(self, obj):
+        height, width, x_off, y_off = self.box_stack[-1]
+        if obj.absolute:
+            x_off = obj.pos_x
+            y_off = obj.pos_y
+        x, y = x_off + obj.margin_left, y_off + obj.margin_top
+
+        val, fg, bg, z_index = self.screen.get(x, y)
+        if obj.color:
+            fg = Terminal.fcolor(obj.color, obj.bright)
+        if obj.bg_color:
+            bg = Terminal.bcolor(obj.bg_color, obj.bg_bright)
+
+        self.screen.set(x, y, fg=fg, bg=bg, z_index=z_index+10)
+
+    def selector(self, obj):
+        try:
+            getattr(self, '_'+obj.type)(obj)
+        except KeyError:
+            return obj.enter(self.selector)
 
 class System(object):
     """
@@ -155,18 +163,17 @@ This class manages the entire application, from calling the renderer to dispatch
     def updatehook(self, obj):
         self.render(obj)
 
-    def render(self, obj=None, _retry=0):
+    def render(self, obj=None, _retry=0, differential=True):
         if self.document.body is None:
             return
         h, w = self.document.height, self.document.width
-        doc = self.renderer.render(h, w)
+        doc = self.renderer.render(h, w, differential=differential)
         try:
             sys.stdout.write(doc)
             sys.stdout.flush()
         except:
             if _retry < 3:
                 return self.render(obj, _retry+1)
-
 
     def getdimensions(self):
         h = bytearray(fcntl.ioctl(0, termios.TIOCGWINSZ, '1234'))
