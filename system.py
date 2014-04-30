@@ -4,6 +4,7 @@ from pyte import ByteStream
 from terminal import Terminal
 from document import *
 from screenbuffer import *
+from collections import deque
 
 class ByteStream(ByteStream):
     def __init__(self, cb):
@@ -158,7 +159,28 @@ This class manages the entire application, from calling the renderer to dispatch
         self.document.setdimensions(*self.getdimensions())
         self.setup()
         self.setup_signal()
-        self.newscreen()
+        self.enable_alternate()
+
+        self.pending = deque([])
+
+        waker, wakew = os.pipe()
+        self.waker, self.wakew = os.fdopen(waker,'rb',0), os.fdopen(wakew,'wb',0)
+
+
+        fl = fcntl.fcntl(waker, fcntl.F_GETFL)
+        fcntl.fcntl(waker, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+    def queue(self, cmd):
+        self.pending.append(cmd)
+        self.wakew.write(b"\x00")
+
+    def handle_queue(self):
+        while len(self.pending):
+            o = self.pending.popleft()
+            if o == 'restore':
+                self.restore()
+            elif o == 'rescale':
+                self.rescale()
 
     def updatehook(self, obj):
         self.render(obj)
@@ -184,31 +206,27 @@ This class manages the entire application, from calling the renderer to dispatch
         if self.document:
             self.document.setdimensions(*self.getdimensions())
             self.document.event(Event('resize', None, None))
-            self.render()
+            self.render(differential=False)
 
     def restore(self):
         self.cleanup()
         self.setup()
+        self.enable_alternate()
         self.rescale()
-        self.newscreen()
 
     def setup_signal(self):
-        signal.signal(signal.SIGWINCH, lambda s,f: self.rescale())
-        signal.signal(signal.SIGCONT, lambda s,f: self.restore())
+        signal.signal(signal.SIGWINCH, lambda s,f: self.queue('rescale'))
+        signal.signal(signal.SIGCONT, lambda s,f: self.queue('restore'))
 
-    def newscreen(self):
-        rendering = '\x1b[0m'
-        rendering += '\x1b[?25l'
-        rendering += '\x1b[1;1H'
-        for i in range(self.document.height):
-            rendering += ' ' * self.document.width
-            if i != self.document.height:
-                rendering += '\n\r'
-        rendering += '\x1b[1;1H'
-        try:
-            sys.stdout.write(rendering)
-        except:
-            pass
+    def enable_alternate(self):
+        sys.stdout.write('\x1b[?25l')
+        sys.stdout.write('\x1b[?1049h')
+        sys.stdout.flush()
+
+    def disable_alternate(self):
+        sys.stdout.write('\x1b[2J')
+        sys.stdout.write('\x1b[?1049l')
+        sys.stdout.flush()
 
     def scroll(self, y):
         self._scroll += y
@@ -222,35 +240,34 @@ This class manages the entire application, from calling the renderer to dispatch
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, new_attrs)
 
         # make things non-blocking
-        # fl = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
-        # fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
-        # fl = fcntl.fcntl(sys.stdout.fileno(), fcntl.F_GETFL)
-        # fcntl.fcntl(sys.stdout.fileno(), fcntl.F_SETFL, fl | ~os.O_NONBLOCK)
+        fl = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
+        fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
     def cleanup(self):
-        self.newscreen()
         if self.oldattrs is not None:
             termios.tcsetattr(sys.stdin, termios.TCSANOW, self.oldattrs)
         sys.stdout.write(Terminal.cursor_show())
         sys.stdout.flush()
+        self.disable_alternate()
 
     def start(self):
         self.render()
         while True:
-            c = sys.stdin.read(1)
-            self.bytestream.feed(c)
-            # allow monitoring of other tasks
-            # try:
-            #     i,o,e = select.select([sys.stdin], tuple(), tuple())
-            #     for s in i:
-            #         if s == sys.stdin:
-            #             try:
-            #                 c = os.read(sys.stdin.fileno(), 1024)
-            #                 self.bytestream.feed(c)
-            #             except IOError:
-            #                 pass
-            # except select.error:
-            #     pass
+            try:
+                i,o,e = select.select((sys.stdin, self.waker), tuple(), tuple())
+            except select.error:
+                continue
+
+            for s in i:
+                if s == sys.stdin:
+                    try:
+                        c = os.read(sys.stdin.fileno(), 128)
+                    except IOError:
+                        continue
+                    self.bytestream.feed(c)
+                elif s == self.waker or len(self.pending) > 0:
+                    self.waker.read(1024)
+                    self.handle_queue()
 
     def getdocument(self):
         return self.document
