@@ -44,6 +44,9 @@ class Node(object):
         # Random user storage
         self.data = {}
 
+    def __len__(self):
+        return self.children.__len__()
+
     def __hash__(self):
         return id(self)
 

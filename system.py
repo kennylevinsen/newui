@@ -250,6 +250,9 @@ This class manages the entire application, from calling the renderer to dispatch
         sys.stdout.flush()
         self.disable_alternate()
 
+        fl = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
+        fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl & ~os.O_NONBLOCK)
+
     def start(self):
         self.render()
         while True:
